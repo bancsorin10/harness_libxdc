@@ -468,6 +468,8 @@ static __attribute__((constructor)) void main(int ac, char **av) {
     int i;
     for (i = 0; i < 50; ++i) {
         uint64_t elapsed = rdtsc();
+        // reset bitmap
+        // memset(bitmap, 0x00, BITMAP_SIZE);
         perf_fd = open_perf_event(getpid());
         // can't reset and zero the buffers so ill just free and reloc
         perf_allocate_buffers(perf_fd, &data, &aux);
@@ -511,8 +513,6 @@ static __attribute__((constructor)) void main(int ac, char **av) {
 
         close(perf_fd);
 
-        // reset bitmap
-        // memset(bitmap, 0x00, BITMAP_SIZE);
         elapsed = rdtsc() - elapsed;
         printf("elapsed ticks %ld\n", elapsed);
 
