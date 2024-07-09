@@ -39,6 +39,13 @@ struct bin_map_s {
     uint64_t last_addr;
 };
 
+static inline uint64_t rdtsc(void)
+{
+    uint32_t low, high;
+    asm volatile("rdtsc":"=a"(low),"=d"(high));
+    return ((uint64_t)high << 32) | low;
+}
+
 static void read_map(int pid, char *map) {
     FILE *proc;
     char path[50];
@@ -433,37 +440,16 @@ static __attribute__((constructor)) void main(int ac, char **av) {
     void *data;
     void *aux;
 
-    perf_fd = open_perf_event(getpid());
-    perf_allocate_buffers(perf_fd, &data, &aux);
-
-    // enable intel_pt
-    ioctl(perf_fd, PERF_EVENT_IOC_RESET, 0);
-    ioctl(perf_fd, PERF_EVENT_IOC_ENABLE, 0);
-
-    // run main
-    main_func(ac, av);
-
-    // disable intel_pt
-    ioctl(perf_fd, PERF_EVENT_IOC_DISABLE, 0);
-
-    uint64_t curr_aux_size;
-    curr_aux_size = get_aux_size(data);
-
-    // debug and check collected trace
-    // debug_log_aux(aux, AUX_SIZE);
-    // debug_log_aux(data);
-
     
     // setup decoding
-    libxdc_t *decoder;
-    uint64_t filter[4][2] = {0}; // cr3 filters not supported by perf?
-    void *bitmap;
-    int bitmap_fd;
     decoder_result_t ret;
+    libxdc_t         *decoder;
 
-    // still need to add some filter
-    // filter[0][0] = 0x500000000000;
-    // filter[0][1] = 0x7fffffffffff;
+    uint64_t filter[4][2] = {0}; // cr3 filters not supported by perf?
+    uint8_t  *trace;
+    void     *bitmap;
+    int      bitmap_fd;
+
 
     // we don't really care we kinda mapped everything
     // there should be no problems
@@ -479,19 +465,57 @@ static __attribute__((constructor)) void main(int ac, char **av) {
             bitmap,
             BITMAP_SIZE);
 
-    // can't write to trace
-    // ((uint8_t *)aux)[AUX_SIZE-1] = 0x55;
-    uint8_t *trace;
-    trace = (uint8_t *)malloc(curr_aux_size + 1);
-    memcpy(trace, aux, curr_aux_size);
-    trace[curr_aux_size] = 0x55;
-    debug_log_aux(trace, curr_aux_size+1);
+    int i;
+    for (i = 0; i < 50; ++i) {
+        uint64_t elapsed = rdtsc();
+        perf_fd = open_perf_event(getpid());
+        // can't reset and zero the buffers so ill just free and reloc
+        perf_allocate_buffers(perf_fd, &data, &aux);
 
-    printf("aux %p-%p size 0x%lx\n", trace, trace+curr_aux_size, curr_aux_size);
+        // enable intel_pt
+        ioctl(perf_fd, PERF_EVENT_IOC_RESET, 0);
+        ioctl(perf_fd, PERF_EVENT_IOC_ENABLE, 0);
 
-    ret = libxdc_decode(decoder, trace, curr_aux_size);
-    if (ret) {
-        printf("decoding failed %d\n", ret);
+        // run main
+        main_func(ac, av);
+
+        // disable intel_pt
+        ioctl(perf_fd, PERF_EVENT_IOC_DISABLE, 0);
+
+        uint64_t curr_aux_size;
+        curr_aux_size = get_aux_size(data);
+        // can't write to trace
+        // ((uint8_t *)aux)[AUX_SIZE-1] = 0x55;
+        trace = (uint8_t *)malloc(curr_aux_size + 1);
+        memcpy(trace, aux, curr_aux_size);
+        trace[curr_aux_size] = 0x55;
+        // debug_log_aux(aux, AUX_SIZE);
+        // debug_log_aux(trace, curr_aux_size+1);
+
+        // printf("aux %p-%p size 0x%lx\n", trace, trace+curr_aux_size, curr_aux_size);
+
+        ret = libxdc_decode(decoder, trace, curr_aux_size);
+        if (ret) {
+            printf("decoding failed %d\n", ret);
+        }
+        // free(trace);
+
+        // free buffers
+        if (data) {
+            munmap(data, DATA_SIZE);
+        }
+
+        if (aux) {
+            munmap(aux, AUX_SIZE);
+        }
+
+        close(perf_fd);
+
+        // reset bitmap
+        // memset(bitmap, 0x00, BITMAP_SIZE);
+        elapsed = rdtsc() - elapsed;
+        printf("elapsed ticks %ld\n", elapsed);
+
     }
 
 
@@ -505,15 +529,7 @@ cleanup:
         close(bitmap_fd);
     }
 
-    if (data) {
-        munmap(data, DATA_SIZE);
-    }
-
-    if (aux) {
-        munmap(aux, AUX_SIZE);
-    }
-
-    close(perf_fd);
+    //close(perf_fd);
 
     free_cache_map(cache_map);
 
