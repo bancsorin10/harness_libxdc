@@ -285,37 +285,28 @@ static uint32_t get_intelpt_type() {
     return (uint32_t)((type[0]-'0')*10 + type[1]-'0');
 }
 
-static int open_perf_event(int pid) {
-    int fd;
-    struct perf_event_attr attr;
+static void create_perf_attr(struct perf_event_attr *attr) {
 
-    memset(&attr, 0, sizeof(attr));
+    memset(attr, 0, sizeof(struct perf_event_attr));
 
     // read type from `/sys/bus/event_source/devices/intel_pt/type`
     // dynamic PMU for intel pt
-    attr.type           = get_intelpt_type();
-    attr.size           = sizeof(attr);
-    attr.disabled       = 1;
-    attr.exclude_kernel = 1;
-    attr.exclude_hv     = 1;
-    attr.exclude_idle   = 1;
+    attr->type           = get_intelpt_type();
+    attr->size           = sizeof(struct perf_event_attr);
+    attr->disabled       = 1;
+    attr->exclude_kernel = 1;
+    attr->exclude_hv     = 1;
+    attr->exclude_idle   = 1;
 
-    // attr.inherit        = 1;
-    // attr.exclude_guest  = 1;
-    // attr.sample_id_all  = 1;
-    // attr.sample_period  = 1;
+    // attr->inherit        = 1;
+    // attr->exclude_guest  = 1;
+    // attr->sample_id_all  = 1;
+    // attr->sample_period  = 1;
 
     // stolen with
     // `perf --debug verbose=2 record -e intel_pt/cyc=0,tsc=0,mtc=0,noretcomp=1/u ./hello`
-    attr.config = 0x300e801;
+    attr->config = 0x300e801;
 
-    fd = syscall(SYS_perf_event_open, &attr, pid, -1, -1, 0);
-    if (fd == -1) {
-        printf("event open failed\n");
-        exit(0);
-    }
-
-    return fd;
 }
 
 static void perf_allocate_buffers(
@@ -419,8 +410,9 @@ static __attribute__((constructor)) void main(int ac, char **av) {
     char map[4096];
     uint64_t main_off = 0x1135;
     struct bin_map_s *cache_map;
+    int pid = getpid();
 
-    read_map(getpid(), map);
+    read_map(pid, map);
     // printf("%s\n", map);
 
     cache_map = create_cache_map(map);
@@ -465,12 +457,20 @@ static __attribute__((constructor)) void main(int ac, char **av) {
             bitmap,
             BITMAP_SIZE);
 
+    struct perf_event_attr attr;
+    create_perf_attr(&attr);
+
     int i;
     for (i = 0; i < 50; ++i) {
         uint64_t elapsed = rdtsc();
         // reset bitmap
         // memset(bitmap, 0x00, BITMAP_SIZE);
-        perf_fd = open_perf_event(getpid());
+        // perf_fd = open_perf_event(getpid());
+        perf_fd = syscall(SYS_perf_event_open, &attr, pid, -1, -1, 0);
+        if (perf_fd == -1) {
+            printf("event open failed\n");
+            exit(0);
+        }
         // can't reset and zero the buffers so ill just free and reloc
         perf_allocate_buffers(perf_fd, &data, &aux);
 
