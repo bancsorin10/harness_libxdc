@@ -6,12 +6,13 @@ General harness for tracing and decoding Intel PT
 
 This is a general harness that can be used for tracing a program with Intel PT.
 The tracing is setup with linux `perf`. The decoding is done by
-[libxdc](https://github.com/nyx-fuzz/libxdc).
+[libxdc](https://github.com/nyx-fuzz/libxdc). The harness is made such that
+the `main` function can be called multiple times.
 
 It works by taking advantage of `__attribute__((constructor))` which stops
-the running program right before main. The address of the main function is
-then computed based on the loaded address and the location of main inside the
-binary. The location of main inside the binary can be found by using `nm` or
+the running program right before `main`. The address of the `main` function is
+then computed based on the loaded address and the location of `main` inside the
+binary. The location of `main` inside the binary can be found by using `nm` or
 if the binary is stripped one can go to the entry point and watch the address
 that is loaded inside the `rdi` register. (more can be seen in a video by
 [LiveOverflow](https://www.youtube.com/watch?v=N1US3c6CpSw))
