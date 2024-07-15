@@ -365,6 +365,9 @@ static void *load_bitmap(int *bitmap_fd) {
     // }
     //
     // bitmap = mmap(NULL, sb.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    //
+    // The bitmap can also be a shared memory region and this will be
+    // modified accordingly
 
     // size of file is known
     bitmap = mmap(
@@ -461,11 +464,9 @@ static __attribute__((constructor)) void main(int ac, char **av) {
     create_perf_attr(&attr);
 
     int i;
-    for (i = 0; i < 50; ++i) {
-        uint64_t elapsed = rdtsc();
-        // reset bitmap
-        // memset(bitmap, 0x00, BITMAP_SIZE);
-        // perf_fd = open_perf_event(getpid());
+    for (i = 0; i < 5; ++i) {
+        // reset bitmap; this is usually done by the fuzzer
+        memset(bitmap, 0x00, BITMAP_SIZE);
         perf_fd = syscall(SYS_perf_event_open, &attr, pid, -1, -1, 0);
         if (perf_fd == -1) {
             printf("event open failed\n");
@@ -486,20 +487,18 @@ static __attribute__((constructor)) void main(int ac, char **av) {
 
         uint64_t curr_aux_size;
         curr_aux_size = get_aux_size(data);
-        // can't write to trace
+        // can't write to trace so we copy things
         // ((uint8_t *)aux)[AUX_SIZE-1] = 0x55;
         trace = (uint8_t *)malloc(curr_aux_size + 1);
         memcpy(trace, aux, curr_aux_size);
         trace[curr_aux_size] = 0x55;
-        // debug_log_aux(aux, AUX_SIZE);
-        // debug_log_aux(trace, curr_aux_size+1);
-
-        // printf("aux %p-%p size 0x%lx\n", trace, trace+curr_aux_size, curr_aux_size);
 
         ret = libxdc_decode(decoder, trace, curr_aux_size);
         if (ret) {
             printf("decoding failed %d\n", ret);
         }
+
+        // cleaned by the decoder
         // free(trace);
 
         // free buffers
@@ -512,10 +511,6 @@ static __attribute__((constructor)) void main(int ac, char **av) {
         }
 
         close(perf_fd);
-
-        elapsed = rdtsc() - elapsed;
-        printf("elapsed ticks %ld\n", elapsed);
-
     }
 
 
@@ -528,8 +523,6 @@ cleanup:
         munmap(bitmap, BITMAP_SIZE);
         close(bitmap_fd);
     }
-
-    //close(perf_fd);
 
     free_cache_map(cache_map);
 
